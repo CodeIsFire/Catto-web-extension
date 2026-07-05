@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Temporary files
+*.log
+
+# Local secrets
+*.local
