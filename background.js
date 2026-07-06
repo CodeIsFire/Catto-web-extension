@@ -5,6 +5,7 @@
 const GROQ_API_KEY_STORAGE_KEY = "groqApiKey";
 let GROQ_API_KEY = "";
 
+// llama-3.3-70b-versatile was deprecated by Groq (announced 2026-06-17).
 // openai/gpt-oss-120b is Groq's recommended replacement for general text use.
 const GROQ_MODEL = "openai/gpt-oss-120b";
 
@@ -79,11 +80,19 @@ function getOutlinePart(pageInfo) {
     .slice(0, 15)
     .join(" | ") || "(none)";
 
+  const optionList = (o.options || [])
+    .slice(0, 40)
+    .map((opt) => `- "${opt.text}" -> selector: ${opt.selector}`)
+    .join("\n") || "(none detected)";
+
   return (
     `Page headings (with CSS selectors you may reference):\n${headingList}\n\n` +
     `Notable links on page (context only — links aren't an editable action target): ${linkList}\n` +
     `Buttons: ${o.buttons.map((b) => b.text).filter(Boolean).slice(0, 10).join(" | ") || "(none)"}\n` +
-    `Form fields: ${o.formFields.map((f) => f.placeholder || f.name || f.type).slice(0, 10).join(" | ") || "(none)"}`
+    `Form fields: ${o.formFields.map((f) => f.placeholder || f.name || f.type).slice(0, 10).join(" | ") || "(none)"}\n\n` +
+    `Detected answer/choice options on the page (radio/checkbox choices or short list items — ` +
+    `useful for quizzes, multiple-choice questions, surveys, etc.), with CSS selectors you may ` +
+    `reference:\n${optionList}`
   );
 }
 
@@ -101,7 +110,13 @@ function getActionVocab() {
     `"tag": "div" | "p" | "span" | "li" | "button" | "a", "text": "...", "href": "... (only if tag is a)"}\n\n` +
     `4. toggle_class — toggle a CSS class on an existing element listed above (e.g. to ` +
     `hide/show or restyle something that already has relevant classes on the page).\n` +
-    `   {"type": "toggle_class", "selector": "<exact selector above>", "className": "..."}\n`
+    `   {"type": "toggle_class", "selector": "<exact selector above>", "className": "..."}\n\n` +
+    `5. highlight_element — visually highlight one of the detected answer/choice options ` +
+    `above (green outline + tint). Use this for quiz/multiple-choice/survey questions when ` +
+    `the person asks which answer is correct — highlight the option selector you believe is ` +
+    `correct, and also say which one and why in your reply. This applies instantly with no ` +
+    `confirmation step, so only use it on the specific option selector(s) you're confident in.\n` +
+    `   {"type": "highlight_element", "selector": "<exact option selector above>"}\n`
   );
 }
 
@@ -118,6 +133,11 @@ function buildChatSystemPrompt(pageInfo) {
     `invent a selector that wasn't listed above. If what they're asking for doesn't match ` +
     `anything on the page, say so plainly in your reply and set "action" to null — don't force ` +
     `an unrelated or approximate action just to have one.\n\n` +
+    `If the page looks like a quiz, test, multiple-choice question, or survey (see the detected ` +
+    `answer/choice options above) and the person asks which answer is correct — or asks you to ` +
+    `just answer it / solve it — figure out the correct option yourself and respond with a ` +
+    `highlight_element action targeting that option's selector, plus a reply explaining which ` +
+    `one and why.\n\n` +
     `${getActionVocab()}\n` +
     `Respond with ONLY a JSON object, no markdown fences, no other text, in this exact shape:\n` +
     `{"reply": "your conversational response to show the person", "action": <one action object ` +
