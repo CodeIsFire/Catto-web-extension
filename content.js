@@ -117,7 +117,46 @@ function extractOutline() {
       selector: selectorFor(el)
     }));
 
-  return { headings, links, buttons, formFields };
+  // Heuristic detection of quiz / multiple-choice answer options, so the
+  // model has real selectors to point highlight_element at instead of
+  // guessing. Two common patterns: (1) a <label> associated with a
+  // radio/checkbox input, (2) short list items in a list where several
+  // siblings look like choices (not a long article list).
+  const seenOptionEls = new Set();
+  const options = [];
+
+  Array.from(document.querySelectorAll("input[type='radio'], input[type='checkbox']"))
+    .slice(0, 40)
+    .forEach((input) => {
+      let label = null;
+      if (input.id) label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+      if (!label) label = input.closest("label");
+      const target = label || input.parentElement;
+      if (!target || seenOptionEls.has(target)) return;
+      const text = truncate(target.innerText || input.value || "", 150);
+      if (!text) return;
+      seenOptionEls.add(target);
+      options.push({ text, selector: selectorFor(target) });
+    });
+
+  Array.from(document.querySelectorAll("ul, ol"))
+    .slice(0, 20)
+    .forEach((list) => {
+      const items = Array.from(list.children).filter((c) => c.tagName === "LI");
+      // Likely a set of answer choices: a handful of short, similarly-sized
+      // items — not a long nav menu or a long-form article list.
+      if (items.length < 2 || items.length > 8) return;
+      const texts = items.map((li) => li.innerText.trim());
+      if (texts.some((t) => !t || t.length > 150)) return;
+      items.forEach((li) => {
+        if (seenOptionEls.has(li)) return;
+        seenOptionEls.add(li);
+        options.push({ text: truncate(li.innerText, 150), selector: selectorFor(li) });
+      });
+    })
+  ;
+
+  return { headings, links, buttons, formFields, options: options.slice(0, 40) };
 }
 
 function collectPageInfo() {
@@ -183,6 +222,7 @@ const originalValues = new Map(); // selector -> original innerText (replace_tex
 const originalInputValues = new Map(); // selector -> original value (fill_input)
 const insertedNodes = new Map(); // action key -> inserted element (insert_element)
 const toggledClasses = new Map(); // action key -> true (toggle_class), so undo knows to toggle back
+const highlightedElsStyles = new Map(); // selector -> original inline cssText (highlight_element)
 let highlightedEl = null;
 
 // Ordered log of currently-applied actions, most recent last, so we can
@@ -223,6 +263,14 @@ function undoOneAction(action) {
     if (!el || !toggledClasses.has(key)) return { ok: false, error: "Nothing to undo for this action." };
     el.classList.toggle(action.className);
     toggledClasses.delete(key);
+    return { ok: true };
+  }
+  if (action.type === "highlight_element") {
+    const el = document.querySelector(action.selector);
+    const original = highlightedElsStyles.get(action.selector);
+    if (!el || original === undefined) return { ok: false, error: "Nothing to undo for this selector." };
+    el.style.cssText = original;
+    highlightedElsStyles.delete(action.selector);
     return { ok: true };
   }
   return { ok: false, error: `Unsupported action type: ${action.type}` };
@@ -349,6 +397,21 @@ function applyActionImpl(action) {
       appliedActionLog.push(action);
       return { ok: true };
 
+    } else if (action.type === "highlight_element") {
+      const el = document.querySelector(action.selector);
+      if (!el) return { ok: false, error: `No element matches selector: ${action.selector}` };
+      if (!highlightedElsStyles.has(action.selector)) {
+        highlightedElsStyles.set(action.selector, el.style.cssText);
+      }
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.style.outline = "3px solid #2e7d32";
+      el.style.outlineOffset = "3px";
+      el.style.backgroundColor = "rgba(46, 125, 50, 0.18)";
+      el.style.borderRadius = el.style.borderRadius || "4px";
+      el.style.transition = "background-color 0.2s, outline 0.2s";
+      appliedActionLog.push(action);
+      return { ok: true };
+
     }
     return { ok: false, error: `Unsupported action type: ${action.type}` };
   } catch (err) {
@@ -388,7 +451,7 @@ window.__aiCompanionBridge = {
   applyAction: applyActionImpl,
   undoAction: undoActionImpl,
   undoAll: undoAllImpl,
-  supportedActionTypes: ["replace_text", "fill_input", "insert_element", "toggle_class"]
+  supportedActionTypes: ["replace_text", "fill_input", "insert_element", "toggle_class", "highlight_element"]
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

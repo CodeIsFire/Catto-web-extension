@@ -425,6 +425,42 @@
     chatLog.scrollTop = chatLog.scrollHeight;
   }
 
+  // Some actions (currently just highlight_element) are non-destructive
+  // visual-only changes, so we apply them the instant the reply arrives
+  // instead of waiting for a "Do it" click — just show an Undo option
+  // afterward in case the person wants it removed.
+  const AUTO_APPLY_ACTION_TYPES = ["highlight_element"];
+
+  function appendAutoAppliedRow(action) {
+    const row = document.createElement("div");
+    row.className = "action-row";
+    const result = bridge() ? bridge().applyAction(action) : { ok: false, error: "Page bridge unavailable." };
+    chatLog.appendChild(row);
+
+    if (!result.ok) {
+      const failBtn = document.createElement("button");
+      failBtn.textContent = result.error || "Couldn't highlight that.";
+      failBtn.disabled = true;
+      styleActionBtn(failBtn, "#a33");
+      row.appendChild(failBtn);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return;
+    }
+
+    const undoBtn = document.createElement("button");
+    undoBtn.textContent = "Undo highlight";
+    styleActionBtn(undoBtn, "#555");
+    undoBtn.addEventListener("click", () => {
+      const undoResult = bridge() ? bridge().undoAction(action) : { ok: false };
+      if (undoResult.ok) {
+        undoBtn.disabled = true;
+        undoBtn.textContent = "Removed";
+      }
+    });
+    row.appendChild(undoBtn);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
   function startPreview(action, row) {
     const result = bridge() ? bridge().previewAction(action) : { ok: false, error: "Page bridge unavailable." };
     if (!result.ok) {
@@ -526,7 +562,11 @@
         appendBubble("bot", payload.reply);
       }
       if (payload.action && SUPPORTED_ACTION_TYPES.includes(payload.action.type)) {
-        appendActionRow(payload.action);
+        if (AUTO_APPLY_ACTION_TYPES.includes(payload.action.type)) {
+          appendAutoAppliedRow(payload.action);
+        } else {
+          appendActionRow(payload.action);
+        }
       }
       setChatInputEnabled(true);
     }
